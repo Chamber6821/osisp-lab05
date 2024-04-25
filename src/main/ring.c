@@ -53,3 +53,12 @@ int Ring_read(struct Ring *this, int length, char bytes[]) {
   Ring_free(this, length);
   return 0;
 }
+
+int Ring_pour(struct Ring *from, struct Ring *to) {
+  int fromLength = Ring_length(from);
+  if (fromLength > Ring_available(to)) return -1;
+  char bytes[Ring_length(from)];
+  Ring_read(from, fromLength, bytes);
+  Ring_send(to, fromLength, bytes);
+  return 0;
+}

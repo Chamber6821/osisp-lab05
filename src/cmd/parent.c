@@ -57,14 +57,14 @@ struct Shared {
 } *shared = NULL;
 
 void initShared(int ringCapacity) {
-  shared = malloc(sizeof(struct Shared) + sizeof(struct Ring) + ringCapacity);
+  shared = malloc(sizeof(struct Shared));
   pthread_mutexattr_t attr;
   pthread_mutexattr_init(&attr);
   pthread_mutex_init(&shared->general, &attr);
   shared->sendCount = 0;
   shared->readCount = 0;
-  shared->ring = (struct Ring *)(((char *)shared) + sizeof(struct Shared));
-  Ring_construct(shared->ring, ringCapacity);
+  shared->ring =
+      Ring_construct(malloc(sizeof(struct Ring) + ringCapacity), ringCapacity);
 }
 
 void destroyShared() {
@@ -135,6 +135,21 @@ void *consumer() {
   return NULL;
 }
 
+void setSharedRingCapacity(int capacity) {
+  pthread_mutex_lock(&shared->general);
+  struct Ring *newRing =
+      Ring_construct(malloc(sizeof(struct Ring) + capacity), capacity);
+  if (Ring_pour(shared->ring, newRing) == 0) {
+    struct Ring *temp = shared->ring;
+    shared->ring = newRing;
+    newRing = temp;
+  }
+  Ring_desctruct(newRing);
+  free(newRing);
+  pthread_mutex_unlock(&shared->general);
+  printf("Ring capacity %d\n", shared->ring->capacity);
+}
+
 typedef int (*handle_f)();
 
 int showInfo() {
@@ -184,6 +199,16 @@ int killConsumer() {
   return 0;
 }
 
+int increaseRingCapacity() {
+  setSharedRingCapacity(shared->ring->capacity * 2);
+  return 0;
+}
+
+int decreaseRingCapacity() {
+  setSharedRingCapacity(shared->ring->capacity / 2);
+  return 0;
+}
+
 int quit() { return -1; }
 
 int unknownCommand() { return 0; }
@@ -195,6 +220,8 @@ handle_f handleFor(char key) {
   case 'P': return killProducer;
   case 'c': return addConsumer;
   case 'C': return killConsumer;
+  case '+': return increaseRingCapacity;
+  case '-': return decreaseRingCapacity;
   case 'q': return quit;
   default: return unknownCommand;
   }

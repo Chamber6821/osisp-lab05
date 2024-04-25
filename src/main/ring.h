@@ -16,3 +16,4 @@ int Ring_free(struct Ring *this, int size);
 char *Ring_byte(struct Ring *this, int index);
 int Ring_send(struct Ring *this, int length, char bytes[]);
 int Ring_read(struct Ring *this, int length, char bytes[]);
+int Ring_pour(struct Ring *from, struct Ring *to);
