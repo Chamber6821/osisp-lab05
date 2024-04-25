@@ -3,24 +3,51 @@
 #include "io.h"
 #include "message.h"
 #include "ring.h"
-#include "shared.h"
 
 #include <alloca.h>
+#include <bits/pthreadtypes.h>
 #include <pthread.h>
-#include <signal.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/wait.h>
 #include <termios.h>
+#include <threads.h>
+#include <time.h>
 #include <unistd.h>
 
-struct Shared *shared;
+struct Worker {
+  int running;
+  pthread_t thread;
+};
 
-volatile int running = 1;
+enum WorkerType { PRODUCER, CONSUMER };
 
-void stop() { running = 0; }
+int producerCount = 0;
+struct Worker *producers = NULL;
+
+int consumerCount = 0;
+struct Worker *consumers = NULL;
+
+thread_local int workerIndex;
+thread_local enum WorkerType workerType;
+
+void Worker_initSelf(enum WorkerType type) {
+  switch (type) {
+  case PRODUCER: workerIndex = producerCount - 1; break;
+  case CONSUMER: workerIndex = consumerCount - 1; break;
+  }
+  workerType = type;
+}
+
+int Worker_running() {
+  switch (workerType) {
+  case PRODUCER: return producers[workerIndex].running;
+  case CONSUMER: return consumers[workerIndex].running;
+  default: return 0;
+  }
+}
 
 struct Shared {
   pthread_mutex_t general;
@@ -30,10 +57,9 @@ struct Shared {
 } *shared = NULL;
 
 void initShared(int ringCapacity) {
-  shared = smalloc(sizeof(struct Shared) + sizeof(struct Ring) + ringCapacity);
+  shared = malloc(sizeof(struct Shared) + sizeof(struct Ring) + ringCapacity);
   pthread_mutexattr_t attr;
   pthread_mutexattr_init(&attr);
-  pthread_mutexattr_setpshared(&attr, PTHREAD_PROCESS_SHARED);
   pthread_mutex_init(&shared->general, &attr);
   shared->sendCount = 0;
   shared->readCount = 0;
@@ -44,17 +70,18 @@ void initShared(int ringCapacity) {
 void destroyShared() {
   Ring_desctruct(shared->ring);
   pthread_mutex_destroy(&shared->general);
-  sfree(shared);
+  free(shared);
 }
 
-void producer() {
+void *producer() {
+  Worker_initSelf(PRODUCER);
   printf("Producer %6d Started\n", getpid());
-  while (running) {
+  while (Worker_running()) {
     sleep(1);
     pthread_mutex_lock(&shared->general);
     char bytes[MESSAGE_MAX_SIZE] = {0};
     struct Message *message = Message_constructRandom((struct Message *)bytes);
-    while (running) {
+    while (Worker_running()) {
       pthread_mutex_unlock(&shared->general);
       pthread_mutex_lock(&shared->general);
       if (Message_sendTo(message, shared->ring) == -1) continue;
@@ -72,13 +99,16 @@ void producer() {
     }
     pthread_mutex_unlock(&shared->general);
   }
+  printf("Producer %6d Stopped\n", getpid());
+  return NULL;
 }
 
-void consumer() {
+void *consumer() {
+  Worker_initSelf(CONSUMER);
   printf("Consumer %6d Started\n", getpid());
-  while (running) {
+  while (Worker_running()) {
     pthread_mutex_lock(&shared->general);
-    while (running) {
+    while (Worker_running()) {
       pthread_mutex_unlock(&shared->general);
       pthread_mutex_lock(&shared->general);
       char bytes[MESSAGE_MAX_SIZE] = {0};
@@ -101,21 +131,9 @@ void consumer() {
     pthread_mutex_unlock(&shared->general);
     sleep(1);
   }
+  printf("Consumer %6d Stopped\n", getpid());
+  return NULL;
 }
-
-pid_t run(void (*worker)()) {
-  pid_t pid = fork();
-  if (pid) return pid;
-  signal(SIGUSR1, stop);
-  worker();
-  exit(0);
-}
-
-int producerCount = 0;
-pid_t *producers = NULL;
-
-int consumerCount = 0;
-pid_t *consumers = NULL;
 
 typedef int (*handle_f)();
 
@@ -131,36 +149,38 @@ int showInfo() {
 }
 
 int addProducer() {
-  pid_t pid = run(producer);
   producerCount++;
   producers = realloc(producers, sizeof(*producers) * producerCount);
-  producers[producerCount - 1] = pid;
+  struct Worker *worker = &producers[producerCount - 1];
+  worker->running = 1;
+  pthread_create(&worker->thread, NULL, producer, NULL);
   return 0;
 }
 
 int killProducer() {
   if (producerCount == 0) return 0;
+  struct Worker *worker = &producers[producerCount - 1];
+  worker->running = 0;
+  pthread_join(worker->thread, NULL);
   producerCount--;
-  printf("Kill producer %6d\n", producers[producerCount]);
-  kill(producers[producerCount], SIGUSR1);
-  waitpid(producers[producerCount], NULL, 0);
   return 0;
 }
 
 int addConsumer() {
-  pid_t pid = run(consumer);
   consumerCount++;
   consumers = realloc(consumers, sizeof(*consumers) * consumerCount);
-  consumers[consumerCount - 1] = pid;
+  struct Worker *worker = &consumers[consumerCount - 1];
+  worker->running = 1;
+  pthread_create(&worker->thread, NULL, consumer, NULL);
   return 0;
 }
 
 int killConsumer() {
   if (consumerCount == 0) return 0;
+  struct Worker *worker = &consumers[consumerCount - 1];
+  worker->running = 0;
+  pthread_join(worker->thread, NULL);
   consumerCount--;
-  printf("Kill consumer %6d\n", consumers[consumerCount]);
-  kill(consumers[consumerCount], SIGUSR1);
-  waitpid(consumers[consumerCount], NULL, 0);
   return 0;
 }
 
