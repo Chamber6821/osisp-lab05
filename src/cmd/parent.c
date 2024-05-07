@@ -75,7 +75,7 @@ void destroyShared() {
 
 void *producer() {
   Worker_initSelf(PRODUCER);
-  printf("Producer %6d Started\n", getpid());
+  printf("Producer %6d Started\n", gettid());
   while (Worker_running()) {
     sleep(1);
     pthread_mutex_lock(&shared->general);
@@ -90,7 +90,7 @@ void *producer() {
       bytes2hex(data, message->size, message->data);
       printf(
           "Producer %6d Sent %04hX:%04hX       %.80s\n",
-          getpid(),
+          gettid(),
           message->type,
           message->hash,
           data
@@ -99,13 +99,13 @@ void *producer() {
     }
     pthread_mutex_unlock(&shared->general);
   }
-  printf("Producer %6d Stopped\n", getpid());
+  printf("Producer %6d Stopped\n", gettid());
   return NULL;
 }
 
 void *consumer() {
   Worker_initSelf(CONSUMER);
-  printf("Consumer %6d Started\n", getpid());
+  printf("Consumer %6d Started\n", gettid());
   while (Worker_running()) {
     pthread_mutex_lock(&shared->general);
     while (Worker_running()) {
@@ -120,7 +120,7 @@ void *consumer() {
       bytes2hex(data, message->size, message->data);
       printf(
           "Consumer %6d Got  %04hX:%04hX(%04hX) %.80s\n",
-          getpid(),
+          gettid(),
           message->type,
           message->hash,
           Message_hash(message),
@@ -131,7 +131,7 @@ void *consumer() {
     pthread_mutex_unlock(&shared->general);
     sleep(1);
   }
-  printf("Consumer %6d Stopped\n", getpid());
+  printf("Consumer %6d Stopped\n", gettid());
   return NULL;
 }
 
