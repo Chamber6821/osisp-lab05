@@ -236,6 +236,10 @@ int main() {
   initShared(1024);
   while (handleFor(getch())() == 0)
     ;
+  for (int i = 0; i < producerCount; i++)
+    producers[i].running = 0;
+  for (int i = 0; i < consumerCount; i++)
+    consumers[i].running = 0;
   while (producerCount)
     killProducer();
   while (consumerCount)
